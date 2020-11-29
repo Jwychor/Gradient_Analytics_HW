@@ -1,0 +1,229 @@
+---
+title: "Gradient Analytics Assignment"
+author: "Jack Wychor"
+date: "November 25, 2020"
+output: 
+  html_document:
+    theme: sandstone            # Keep this theme - our custom CSS is build upon it
+    highlight: tango            # Keep this theme - our custom CSS is build upon it
+    keep_md: false              # FALSE if you don't want a MD copy
+    code_folding: show          # Makes your code chunks foldable. Delete if you don't want that.
+    toc: TRUE                   # FALSE if you don't want a TOC
+    toc_depth: 3                # Depth of the TOC
+#   css: style/gradient_stylesheet.css
+#   includes:
+#     in_header: "style/favicon.html" # Keep to add a favicon to the page
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(
+	comment = "",
+	message = FALSE,
+	warning = FALSE,
+	tidy.opts = list(
+		keep.blank.line = TRUE,
+		width.cutoff = 150
+		),
+	options(width = 150),
+	eval = TRUE,
+	echo = TRUE,
+	fig.height =6,
+	fig.width = 12,
+	fig.align = "left"
+)
+# print head
+# don't print long-lines
+```
+
+#### Author: Jack Wychor
+
+The following packages were used for this solution:
+
+```{r Packages, results = 'hide'}
+library(tidyverse)
+library(MASS)
+library(caret)
+library(haven)
+library(purrr)
+library(reshape2)
+library(scales)
+library(ordinal)
+library(lattice)
+
+select <- dplyr::select
+setwd("C:\\Users\\jwych\\Documents\\GitHub\\Gradient_Analytics_HW")
+```
+
+## Task 1
+##### Find out how each attribute (and level) influences the overall likeliness to download (experiment_data$answer).
+
+<b>BACKGROUND</b>: 892 participants were asked to rate "How likely are you to download this mobile app?" for 12 random permutations of a message describing the app. 
+
+The first step to completing this task involves loading the data and exploring the distributions and types of data that we will be working with.
+
+```{r Load experiment data}
+experiment_data <-
+  read_sav('data/experiment_data.sav')
+
+str(experiment_data)
+```
+
+### Distribution of Answers
+
+As we can see, there are 9 variables: A participant ID variable (response_ID), a conditional variable noting which session a person had (Task), 6 dependent variables (duration, offer, outcome, price, rtb, social_proof), and 1 dependent variable (answer).
+
+Let's look at the distribution of data for each level of each variable except 'response_id'.
+
+```{r Distribution of responses}
+# Melting data by 
+experiment_data %>%
+  melt(id = c("response_id")) %>%
+  group_by(value) %>%
+  count(variable) %>%
+  ungroup() %>% group_by(variable) %>%
+  mutate(pct = round(n/sum(n),4) * 100)%>%
+  arrange(variable) %>%
+  ggplot(aes(x = variable, y = pct, fill = fct_rev(value))) + 
+  geom_bar(fill = rep(c("#44C2BD", "#0E93DA"),20), stat = "identity", position = position_stack(vjust = 0.5)) +
+  geom_text(aes(label = pct), position = position_stack(vjust = 0.5)) +
+  theme(legend.position = "none") +
+  labs(x = "Variable", y = "Percent of Total", title = "Distribution of Each Level of Each Variable") +
+  theme_bw()
+```
+
+<b>NOTE</b>: Variable names are long and therefore were left out of the visualization. Each colored portion represents the percentage that a level of a variable takes up relative to the total responses for each level of that variable.
+
+With the exception of the dependent variable, 'answer', each variable has an even split of data for each of it's levels. Let's investigate the distribution of responses for 'answer'.
+
+One last thing: each variable is currently coded as either numeric or character. Going forward, we need to convert them to factors.
+
+```{r Convert to factors}
+# Convert variable types to factor
+experiment_data <- experiment_data %>%
+  mutate_all(~ as.factor(.))
+```
+
+
+```{r Distribution of answer}
+# Percentage of responses for each answer
+experiment_data %>%
+  select(answer) %>%
+  table() %>%
+  prop.table() %>%
+  round(2) * 100
+
+experiment_data %>%
+  histogram(~ answer,
+             main = "Distribution of Answers",
+             data = .)
+```
+Participants answered 1 (very unlikely) as often as 2 and 3 (somewhate unlikely and somewhat likely, respectively) combined. The target answer, 4 (very likely) was answered the least with only 15% of responses. 
+
+<b>NOTE</b>: This imbalance is important to keep in mind when looking at the distributions of predictor variables although statistically, it should not create any problems when building models.
+
+### Distribution of Answers for each Predictor
+
+To get a feel for how each level of each predictor may affect participants' likelieness to use the app, bivariate histograms of each relationship were plotted below.
+
+#### Price
+```{r Response distributions price}
+experiment_data %>%
+  histogram(~ answer | price, 
+            main = "Responses by Price",
+            data = .)
+```
+
+It appears that '$20/month' is the most desirable choice with both the lowest number of 1's and the highest number of 4's.
+
+#### Duration
+```{r Response distributions duration}
+experiment_data %>%
+  histogram(~ answer | duration, 
+            main = "Responses by Duration",
+            data = .)
+```
+
+Duration looks a little less clear although '3 months' has a slight edge in terms of the number of 3s compared to '6 months'.
+
+#### Offer
+
+```{r Response distributions offer}
+experiment_data %>%
+  histogram(~ answer | offer, 
+            main = "Responses by Offer",
+            data = .)
+```
+
+Similar to 'duration', responses tend to match the answers distribution. At a glance, the 'help you sleep more without pills' looks the best with a slightly lower rate of 1s and slightly higher rate of 3s than average.
+
+#### Outcome
+
+```{r Response distributions outcome}
+experiment_data %>%
+  histogram(~ answer | outcome, 
+            main = "Responses by Outcome",
+            data = .)
+```
+
+'breaking bad habits and creating new routines' looks most promising with the lowest rate of 1s and the highest rate of 4s.
+
+#### Price
+
+```{r Response distributions RTB}
+experiment_data %>%
+  histogram(~ answer | rtb, 
+            main = "Responses by RTB",
+            data = .)
+```
+
+Although there are no standout winners for 'rtb', there are a few losers. 'daily text messages from a coach' shows a higher rate of 1's while 'personalized, human coaching' and 'the suppport of a community of people just like you' show more 2's and less 3's than average.
+
+#### Social Proof
+
+```{r Response distributions Social Proof}
+experiment_data %>%
+  histogram(~ answer | social_proof, 
+            main = "Responses by Social Proof",
+            data = .)
+```
+
+#### Task Number
+```{r Response distributions Task}
+experiment_data %>%
+  histogram(~ answer | task, 
+            main = "Responses by Task Number",
+            data = .,
+            layout = c(6,2))
+```
+
+### Fitting a Model
+
+The previous distributions gave us a feel for how the data is distributed and now we will consider each variable together in a linear model. Given that our dependent variable is ordinal, we will be using the 'ordinal' package which contains many helpful functions for ordinal regression. It is important to note that 'response_id' requires special treatment. In the model, this should will be considered a random effect because each rating in the data is not made by a unique person.
+
+The 'clmm' function allows us to fit a cumulative link mixed model (analagous to a mixed ordinal regression model), which allows for each parameter type our model requires. These are:
+
+##### <u>Fixed</u>
+duration, price, offer, outcome, rtb, social_proof
+
+##### <u>Random</U>
+response_id
+
+##### <u>Dependent</u>
+answer
+
+<b>NOTE</b>: This task is inferential rather than predictive, so data will not need to undergo typical predictive treatment such as splitting and training.
+
+```{r Ordinal regression model}
+ORModel <- experiment_data %>%
+  sample_n(1000) %>%
+  clmm(answer ~ duration  + price + offer + outcome + rtb + social_proof + (1|response_id),
+       data = .,
+      Hess = TRUE)
+
+summary(ORModel)
+```
+
+```{r Effects plot}
+
+```
