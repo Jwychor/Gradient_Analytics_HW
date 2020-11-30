@@ -32,6 +32,9 @@ opts_chunk$set(
 	fig.width = 12,
 	fig.align = "left"
 )
+# remove scientific notation
+options(scipen = 999)
+
 # print head
 # don't print long-lines
 ```
@@ -50,12 +53,13 @@ library(reshape2)
 library(scales)
 library(ordinal)
 library(lattice)
+library(ggcorrplot)
 
 select <- dplyr::select
 setwd("C:\\Users\\jwych\\Documents\\GitHub\\Gradient_Analytics_HW")
 ```
 
-## Task 1
+# Task 1
 ##### Find out how each attribute (and level) influences the overall likeliness to download (experiment_data$answer).
 
 <b>BACKGROUND</b>: 892 participants were asked to rate "How likely are you to download this mobile app?" for 12 random permutations of a message describing the app. 
@@ -63,15 +67,25 @@ setwd("C:\\Users\\jwych\\Documents\\GitHub\\Gradient_Analytics_HW")
 The first step to completing this task involves loading the data and exploring the distributions and types of data that we will be working with.
 
 ```{r Load experiment data}
+# Load the data
 experiment_data <-
   read_sav('data/experiment_data.sav')
 
+# Return the structure of our data
 str(experiment_data)
 ```
 
-### Distribution of Answers
+## Distribution of Answers
 
 As we can see, there are 9 variables: A participant ID variable (response_ID), a conditional variable noting which session a person had (Task), 6 dependent variables (duration, offer, outcome, price, rtb, social_proof), and 1 dependent variable (answer).
+
+Additionally, our data has a great sample size (n = 10,704) and is very clean posessing no NA's.
+
+```{r NA check}
+# Count the number of NA's in each column
+experiment_data %>%
+  summarize_all(~ sum(is.na(.)))
+```
 
 Let's look at the distribution of data for each level of each variable except 'response_id'.
 
@@ -105,28 +119,23 @@ experiment_data <- experiment_data %>%
 ```
 
 
-```{r Distribution of answer}
+```{r Distribution of answers}
 # Percentage of responses for each answer
-experiment_data %>%
-  select(answer) %>%
-  table() %>%
-  prop.table() %>%
-  round(2) * 100
-
 experiment_data %>%
   histogram(~ answer,
              main = "Distribution of Answers",
              data = .)
 ```
+
 Participants answered 1 (very unlikely) as often as 2 and 3 (somewhate unlikely and somewhat likely, respectively) combined. The target answer, 4 (very likely) was answered the least with only 15% of responses. 
 
 <b>NOTE</b>: This imbalance is important to keep in mind when looking at the distributions of predictor variables although statistically, it should not create any problems when building models.
 
-### Distribution of Answers for each Predictor
+## Distribution of Answers for each Predictor
 
 To get a feel for how each level of each predictor may affect participants' likelieness to use the app, bivariate histograms of each relationship were plotted below.
 
-#### Price
+### Price
 ```{r Response distributions price}
 experiment_data %>%
   histogram(~ answer | price, 
@@ -136,7 +145,7 @@ experiment_data %>%
 
 It appears that '$20/month' is the most desirable choice with both the lowest number of 1's and the highest number of 4's.
 
-#### Duration
+### Duration
 ```{r Response distributions duration}
 experiment_data %>%
   histogram(~ answer | duration, 
@@ -146,7 +155,7 @@ experiment_data %>%
 
 Duration looks a little less clear although '3 months' has a slight edge in terms of the number of 3s compared to '6 months'.
 
-#### Offer
+### Offer
 
 ```{r Response distributions offer}
 experiment_data %>%
@@ -157,7 +166,7 @@ experiment_data %>%
 
 Similar to 'duration', responses tend to match the answers distribution. At a glance, the 'help you sleep more without pills' looks the best with a slightly lower rate of 1s and slightly higher rate of 3s than average.
 
-#### Outcome
+### Outcome
 
 ```{r Response distributions outcome}
 experiment_data %>%
@@ -168,7 +177,7 @@ experiment_data %>%
 
 'breaking bad habits and creating new routines' looks most promising with the lowest rate of 1s and the highest rate of 4s.
 
-#### Price
+### Price
 
 ```{r Response distributions RTB}
 experiment_data %>%
@@ -179,7 +188,7 @@ experiment_data %>%
 
 Although there are no standout winners for 'rtb', there are a few losers. 'daily text messages from a coach' shows a higher rate of 1's while 'personalized, human coaching' and 'the suppport of a community of people just like you' show more 2's and less 3's than average.
 
-#### Social Proof
+### Social Proof
 
 ```{r Response distributions Social Proof}
 experiment_data %>%
@@ -188,7 +197,9 @@ experiment_data %>%
             data = .)
 ```
 
-#### Task Number
+### Task Number
+'task' is not within the variables to be directly analyzed, however it is important to check that there are no times that have significantly different times than the other. For example, if time 12 has many more 1s than 4s, this may signal that participants become less and less likely to purchase an app with more exposure to advertisements. While interesting, this is outside the scope of this project and we will only be galncing at the distributions to make sure that none are significantly different.
+
 ```{r Response distributions Task}
 experiment_data %>%
   histogram(~ answer | task, 
@@ -197,7 +208,20 @@ experiment_data %>%
             layout = c(6,2))
 ```
 
-### Fitting a Model
+## Multicollinearity
+
+One common issue that can impact multivariate analyses of linear models is multicollinearity, or the correlation of predictor variables. We will create a matrix of the relationships between all predictors to check for mutlicollinearity.
+
+```{r Correlation plot}
+# Test independence of all predictors for all 2-way interactions
+experiment_data %>%
+  xtabs(~ duration + offer + outcome + price + rtb + social_proof, data = .) %>%
+  loglm(~ duration + offer + outcome + price + rtb + social_proof, data = .)
+```
+
+The p-value (<i>p</i> = 0.21) is not small enough to provide evidence that the predictor variables are pairwise-dependent. This means we have evidence that our predictor variables are not multicollinear. 
+
+## Fitting a Model
 
 The previous distributions gave us a feel for how the data is distributed and now we will consider each variable together in a linear model. Given that our dependent variable is ordinal, we will be using the 'ordinal' package which contains many helpful functions for ordinal regression. It is important to note that 'response_id' requires special treatment. In the model, this should will be considered a random effect because each rating in the data is not made by a unique person.
 
@@ -212,18 +236,20 @@ response_id
 ##### <u>Dependent</u>
 answer
 
-<b>NOTE</b>: This task is inferential rather than predictive, so data will not need to undergo typical predictive treatment such as splitting and training.
+<b>NOTE</b>: This task is inferential rather than predictive, so data will not need to undergo typical predictive modeling treatment such as splitting and training.
 
 ```{r Ordinal regression model}
 ORModel <- experiment_data %>%
-  sample_n(1000) %>%
-  clmm(answer ~ duration  + price + offer + outcome + rtb + social_proof + (1|response_id),
+  #sample_n(8000) %>%
+  clmm(answer ~ duration  + price + offer + outcome + rtb + social_proof +
+         (1|response_id),
        data = .,
+       nAGQ = 10,
       Hess = TRUE)
 
 summary(ORModel)
 ```
 
-```{r Effects plot}
+```{r Ordinal regression model}
 
 ```
