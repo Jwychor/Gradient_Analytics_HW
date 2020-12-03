@@ -103,11 +103,11 @@ The first step to completing this task involves loading the data and exploring t
 
 ```{r Load experiment data, warning=FALSE, message=FALSE}
 # Set root directory
-setwd("..")
+setwd("../")
 
 # Load the data
 experiment_data <-
-  read_sav('data/experiment_data.sav')
+  read_sav('inst/extdata/data/experiment_data.sav')
 
 # Return the structure of our data
 glimpse(experiment_data)
@@ -412,7 +412,7 @@ setwd("..")
 
 # Load data
 survey_data <-
-  read_sav('data/survey_data.sav')
+  read_sav('inst/extdata/data/survey_data.sav')
 
 # Store the colnames of the survey data
 SurveyColnames <- colnames(survey_data)
