@@ -11,7 +11,7 @@ output:
     toc_depth: 3                # Depth of the TOC
 vignette: >
   %\VignetteIndexEntry{Analysis}
-  %\VignetteEngine{knitr::knitr}
+  %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
 
