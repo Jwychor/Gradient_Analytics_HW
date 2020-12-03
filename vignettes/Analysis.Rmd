@@ -10,7 +10,7 @@ output:
     toc: TRUE                   # FALSE if you don't want a TOC
     toc_depth: 3                # Depth of the TOC
 vignette: >
-  %\VignetteIndexEntry{Gradient Analytics Assignment}
+  %\VignetteIndexEntry{Analysis}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
