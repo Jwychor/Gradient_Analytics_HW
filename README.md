@@ -1,5 +1,5 @@
 # Gradient Analytics Assignment
- An R script analyzing data for Gradient Analytics.
+An R and Rmarkdown package analyzing data for Gradient Analytics.
 
 ## Installation
 The following code will install the package on your machine.
@@ -20,3 +20,4 @@ To view the vignette in your browser, run the following:
 ```
 browseVignettes('GAnalysis')
 ```
+Alternatively, view the vignette on Rpubs [here.](https://rpubs.com/jwychor/GAnalytics)
