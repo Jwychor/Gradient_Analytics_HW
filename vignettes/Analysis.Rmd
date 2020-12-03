@@ -55,6 +55,7 @@ opts_chunk$set(
 	class.source = "code-chunk",
 	class.output = "output-chunk"
 )
+
 # remove scientific notation
 options(scipen = 999)
 
