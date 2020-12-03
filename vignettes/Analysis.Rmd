@@ -1,0 +1,859 @@
+---
+title: "Gradient Analytics Assignment"
+author: "Jack Wychor"
+date: "December 3rd, 2020"
+output: 
+  html_document:
+    theme: sandstone
+    keep_md: false              # FALSE if you don't want a MD copy
+    code_folding: show          # Makes your code chunks foldable. Delete if you don't want that.
+    toc: TRUE                   # FALSE if you don't want a TOC
+    toc_depth: 3                # Depth of the TOC
+vignette: >
+  %\VignetteIndexEntry{Gradient Analytics Assignment}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{css, echo = FALSE}
+p {
+  font-family: Helvetica;
+  font-size: 12pt;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+}
+
+.output-chunk {
+  color: #064669;
+}
+
+.code-chunk {
+  color: rgb(41, 43, 44);
+  background: rgba(3, 221, 255, 0.15);
+  border: solid 1px rgba(3, 221, 255, 1);
+}
+```
+
+```{r setup, echo=FALSE}
+library(knitr)
+opts_chunk$set(
+	comment = "",
+	message = FALSE,
+	warning = FALSE,
+	tidy.opts = list(
+		keep.blank.line = TRUE,
+		width.cutoff = 150
+		),
+	options(width = 150),
+	eval = TRUE,
+	echo = TRUE,
+	fig.height = 7,
+	fig.width = 12,
+	fig.align = "left",
+	class.source = "code-chunk",
+	class.output = "output-chunk"
+)
+# remove scientific notation
+options(scipen = 999)
+
+# project colors
+colorSet <- c("#44C2BD", "#0E93DA")
+
+# print head
+# don't print long-lines
+```
+
+# Packages
+
+The following packages were used for this solution:
+```{r Packages,  results='hide', message=FALSE, warning=FALSE}
+library(tidyverse)
+library(MASS)
+library(caret)
+library(haven)
+library(purrr)
+library(reshape2)
+library(scales)
+library(ordinal)
+library(lattice)
+library(psych)
+library(fastDummies)
+library(FactoMineR)
+library(factoextra)
+library(logisticPCA)
+library(klaR)
+
+# Ensure 'select' comes from package 'dplyr'
+select <- dplyr::select
+
+# Ensure 'alpha' comes from 'psych'
+alpha <- psych::alpha
+```
+
+# Task 1
+
+#### Find out how each attribute (and level) influences the overall likeliness to download (experiment_data$answer).
+
+<b>BACKGROUND</b>: 892 participants were asked to rate "How likely are you to download this mobile app?" for 12 random permutations of a message describing the app. 
+
+The first step to completing this task involves loading the data and exploring the distributions and types of data that we will be working with.
+
+```{r Load experiment data, warning=FALSE, message=FALSE}
+# Set root directory
+setwd("..")
+
+# Load the data
+experiment_data <-
+  read_sav('data/experiment_data.sav')
+
+# Return the structure of our data
+glimpse(experiment_data)
+```
+
+## Distribution of Answers
+
+As we can see, there are 9 variables: A participant ID variable (response_ID), a conditional variable noting which session a person had (Task), 6 dependent variables (duration, offer, outcome, price, rtb, social_proof), and 1 dependent variable (answer).
+
+Additionally, our data has a great sample size (n = 10,704) and is very clean posessing no NA's.
+
+```{r NA check}
+# Count the number of NA's in each column
+experiment_data %>%
+  summarize_all(~ sum(is.na(.)))
+```
+
+Let's look at the distribution of data for each level of each variable (except 'response_id') using `ggplot2`.
+
+```{r Distribution of responses}
+# Melt data into long format then graph percent of total for each variable
+experiment_data %>%
+  melt(id = c("response_id")) %>%
+  group_by(value) %>%
+  count(variable) %>%
+  ungroup() %>% group_by(variable) %>%
+  mutate(pct = round(n/sum(n),4) * 100)%>%
+  arrange(variable) %>%
+  ggplot(aes(x = variable, y = pct, fill = fct_rev(value))) + 
+  geom_bar(fill = rep(c(colorSet),20), stat = "identity", position = position_stack(vjust = 0.5)) +
+  geom_text(aes(label = pct), position = position_stack(vjust = 0.5), size = 6) +
+  labs(x = "Variable", y = "Percent of Total", title = "Distribution of Each Level of Each Variable (%)") +
+  theme_bw() +
+  theme(legend.position = "none", axis.text = element_text(size = 10), axis.title = element_text(size = 14), title = element_text(size = 16))
+```
+
+> <b>NOTE</b>: Variable names are long and therefore were left out of the visualization. Each colored portion represents the percentage that a level of a variable takes up relative to the total responses for that variable.
+
+With the exception of the dependent variable, 'answer', each variable has an even split of data for each of it's levels. Let's investigate the distribution of responses for 'answer'.
+
+One last thing: each variable is currently coded as either numeric or character. Going forward, we need to convert them to factors.
+
+```{r Distribution of answers}
+# Convert variable types to factor
+experiment_data <- experiment_data %>%
+  mutate_all(~ as.factor(.))
+
+# Percentage of responses for each answer
+experiment_data %>%
+  histogram(~ answer,
+             main = "Distribution of Answers",
+             data = .)
+```
+
+Participants answered 1 (very unlikely) as often as 2 and 3 (somewhat unlikely and somewhat likely, respectively) combined. The target answer, 4 (very likely) was answered the least with only 15% of responses. 
+
+This imbalance is important to keep in mind when looking at the distributions of predictor variables although statistically, it should not create any problems when building models.
+
+## Distribution of Answers for each Predictor {.tabset}
+
+To get a feel for how each level of each predictor may affect participants' likeliness to use the app, bi-variate histograms of each relationship were plotted below.
+
+### Price
+```{r Response distributions price}
+experiment_data %>%
+  histogram(~ answer | price, 
+            main = "Responses by Price",
+            data = .)
+```
+
+It appears that '$20/month' is the most desirable choice with both the lowest number of 1's and the highest number of 4's.
+
+### Duration
+```{r Response distributions duration}
+experiment_data %>%
+  histogram(~ answer | duration, 
+            main = "Responses by Duration",
+            data = .)
+```
+
+Duration looks a little less clear, although '3 months' may have a slight edge in terms of the number of 3s compared to '6 months'.
+
+### Offer
+```{r Response distributions offer}
+experiment_data %>%
+  histogram(~ answer | offer, 
+            main = "Responses by Offer",
+            data = .)
+```
+
+Similar to 'duration', responses tend to match the answers distribution. At a glance, the 'help you sleep more without pills' looks the best with a slightly lower rate of 1s and slightly higher rate of 3s than average.
+
+### Outcome
+```{r Response distributions outcome}
+experiment_data %>%
+  histogram(~ answer | outcome, 
+            main = "Responses by Outcome",
+            data = .)
+```
+
+'breaking bad habits and creating new routines' looks most promising with the lowest rate of 1s and the highest rate of 4s.
+
+### RTB
+```{r Response distributions RTB}
+experiment_data %>%
+  histogram(~ answer | rtb, 
+            main = "Responses by RTB",
+            data = .)
+```
+
+Although there are no standout winners for 'rtb', there are a few losers. 'daily text messages from a coach' shows a higher rate of 1's while 'personalized, human coaching' and 'the suppport of a community of people just like you' show more 2's and less 3's than average.
+
+### Social Proof
+```{r Response distributions Social Proof}
+experiment_data %>%
+  histogram(~ answer | social_proof, 
+            main = "Responses by Social Proof",
+            data = .)
+```
+
+### Task Number
+
+'task' is not within the variables to be directly analyzed, however it is important to check that there are no times that have significantly different times than the other. For example, if 'time 12' has many more people responding with '1' than '4' than 'time 1', this may signal that participants become less and less likely to purchase an app with more exposure to advertisements. Both variables are truly ordinal, so Kendall's Tau will be used as the correlation coefficient. Additionally, a 'count' plot from `ggplot2` will help visualize the distribution of responses.
+
+```{r Response distributions Task}
+# Count plot of 'answer' by 'task'
+experiment_data %>%
+  ggplot(aes(x = task, y = answer)) +
+  geom_count(color = colorSet[1]) +
+  labs(title = "Answers by Task", x = "Answer", y = "Task") +
+  theme_bw() +
+  theme(axis.text = element_text(size = 10), axis.title = element_text(size = 14), title = element_text(size = 16))
+
+# Correlation between 'task' and 'answer'
+experiment_data %>%
+  select(task, answer) %>%
+  mutate_all(~ as.numeric(.)) %>%
+  cor(., method = "kendall") %>%
+  .[1,2]
+```
+
+Kendall's Tau is negligible (𝜏 = -0.01), and there appears to be no relationship given the count plot.
+
+## Multicollinearity
+
+One common issue that can impact multivariate analyses of linear models is multicollinearity, or the correlation of predictor variables. We will run a test of the relationships between all predictors to check for multicollinearity.
+
+```{r Multicollinearity test}
+# Test independence of all predictors for all 2-way interactions
+experiment_data %>%
+  xtabs(~ duration + offer + outcome + price + rtb + social_proof, data = .) %>%
+  loglm(~ duration + offer + outcome + price + rtb + social_proof, data = .)
+```
+
+The p-value (<i>p</i> = 0.21) is not small enough to provide evidence that the predictor variables are pairwise-dependent. Therefore, our predictors are not multicollinear.
+
+## Fitting a Model
+
+The previous distributions gave us a feel for how the data is distributed and now we will consider each variable together in a linear model. Given that our dependent variable is ordinal, we will be using the `ordinal` package which contains many helpful functions for ordinal regression.
+
+The `clm` function allows us to fit a cumulative link model (analogous to an ordinal regression model), which allows for each parameter type our model requires. These are:
+
+##### <b>Independent (Fixed)</b>
+duration, price, offer, outcome, rtb, social_proof
+
+##### <b>Dependent</b>
+answer
+
+> <b>NOTE</b>:
+1.) This task is inferential rather than predictive, so data will not need to undergo typical predictive modeling treatment such as splitting and training. <br/>
+2.) 'task' is left out of the model for the sake of simplicity. Although it is possible that in one of the models 'task' displays a significant interactive effect, this would be hard to interpret and provide little to no inferential value.
+
+```{r Ordinal regression model}
+# Create a cumulative link mixed model including all predictors
+# WARNING: This may take a very long time to compute
+ORModel <- experiment_data %>%
+  clm(answer ~ duration  + price + offer + outcome + rtb + social_proof,
+       data = .,
+       nAGQ = 10,
+      Hess = TRUE)
+
+summary(ORModel)
+```
+
+The output is rather large, but we really only need to pay attention to two values per coefficient. The estimate shows the strength and direction of the relationship while the p-value provides the probability of our effect in the hypothesis testing sense. The standard cutoff for p-values for human-level data is p < 0.05. Thankfully, those outputs are marked with ```.```, ```*```, ```**```, or ```***``` if they are significant or approaching significance. 
+
+Each coefficient is a combination of the level name prefixed by the variable. Additionally, the estimates are relative to the expected difference from the first level of the variable. Therefore, each variable has ```n - 1``` estimates where ```n``` is the number of levels the variable has.
+
+In addition, the threshold coefficients provide the estimated standardized differences between each level of 'answers'. While there are no p-values for this output, the z-values show that these estimates have > 99.99% confidence. Therefore, each level of answer is sufficiently different in a step-wise fashion.
+
+Some variables appear to have an optimal level:
+
+> <b>Price</b>: $20 <br/> <b>Social Proof</b>: scientific evidence
+
+While others have levels that are worse than other levels:
+
+> <b>RTB</b>: the support of a community of people just like you | daily text messages from a coach <br/> <b>Outcome</b>: empowering you to take back your sleep habits
+
+And still other main effects are unrelated to the outcome given that none of their levels are better/worse:
+
+> <b>Offer</b> <br/> <b>Duration</b>
+
+### Proportional Odds Test
+
+One last thing to test before moving on is the assumption of proportional odds. This assumption states that effects need to be equal for each level of the dependent variable. If this assumption is violated, the effects are not truly ordinal but rather nominal. The `nominal_test` function can test this.
+
+```{r Nominal test}
+# Test the proportional odds assumption
+nominal_test(ORModel)
+```
+
+There is no evidence for nominal effects so we may continue.
+
+### Interactions
+
+Our model has shown us the main effects, now we are going to test for interactions (i.e. a certain level of 'price' and 'duration' together are a better predictor of 'answer' than looking at either separately).
+
+We will start with 2 way interactions and test for a significant difference between the interaction model and the main-effects model.
+
+```{r Ordinal regression interactions model}
+# Create a model testing 2-way interactions
+ORModelX <- experiment_data %>%
+  clm(answer ~ (price + outcome + rtb + social_proof + offer + duration)^2,
+       data = .,
+       nAGQ = 10,
+      Hess = TRUE)
+
+# Compare the main effects only model to the interaction model
+anova(ORModel, ORModelX)
+```
+
+Our test shows that the interactions model and main-effects model are not significantly different (χ2 = 0.51). Higher-order interactions (e.g. three-way) may exist but are both unlikely and hard to interpret as our 2-way interactions model already has 152 parameters (Yikes!).
+
+## Conclusion
+
+Our analysis yields the following conclusions about each variable:
+
+### Price
+
+<b>Price clearly has an optimal level of '\$20' </b> and each increase ('\$30', '\$40') has a negative effect on likeliness to rate high. Additionally, this effect is very large relative to the proceeding effects ('\$30' and '\$40' coefficients were β = -0.36 and β = -0.50, respectively, compared to '\$20').
+
+### Social Proof
+
+<b>'scientific evidence' and 'leading researchers' were significantly better than 'professional athletes' and 'a method that has helped thousands' </b> with very similar coefficients (β = 0.10 for both). This means that people prefer 'expert' or 'scientific' evidence over other types of evidence. 
+
+> <b>NOTE:</b> Coefficients can be compared proportionally, therefore this effect has a 3.5x - 5x times smaller effect on answer than price.
+
+### RTB
+
+Although no level emerged clearly the best for 'RTB', there were some clear losers. 'daily text messages from a coach' was significantly worse (β = -0.16) while 'the support of a community of people just like you' approached significance (β = -0.06), <b>so avoid using these two levels</b>. Technically, 'A program created just for you' performed best, but difference between this level and the remaining 3 levels is insignificant, so all 4 will be considered equal.
+
+### Outcome 
+
+<b>The phrase to avoid for 'Outcome'</b> is 'empowering you to take back your sleep habits' (β = -0.12). 'breaking bad habits and creating new routines' had a higher estimation than 'empowering you to take back your sleep habits' (β = 0.04), but the difference was small and insignificant.
+
+### Duration and Offer
+
+No levels for both of these variables were significantly different. In fact, a model that drops both is not significantly different from the main-effects model.
+
+```{r Dropped terms model comparison}
+# Build a new model that drops 'duration' and 'price' 
+ORModel2 <- experiment_data %>%
+  clm(answer ~ outcome + price + rtb + social_proof,
+       data = ., 
+      Hess = T)
+
+# Compare the models
+anova(ORModel, ORModel2)
+```
+
+Therefore, we can conclude that these two variables are unrelated to the probability that an individual will download the app.
+
+## Summary
+
+The combination of levels that is most likely to lead to an individual wanting to download the app is:
+
+> <b>Price</b> = the lowest possible price
+
+> <b>Social Proof</b> = scientific or research based statement
+
+> <b>RTB</b> = <u>DO NOT USE</u>: 'daily messages from a coach' <u>OR</u> 'the support of a community of people just like you'. The other 4 levels were not significantly different, so RTB is not as strongly related as the previous 2 variables <u>OR</u> the remaining 4 phrases are not a standout phrase for this variable and one will need to be found.
+
+> <b>Outcome</b> = <u>USE</u>: 'changing your sleep mindset' <u>OR</u> 'breaking bad habits and creating new routines'.
+
+> <b>Duration</b> = Unrelated to the outcome
+
+> <b>Offer</b> = Unrelated to the outcome
+
+# Task 2
+
+#### Describe the groups of respondents that we see in the data using the added demographic, psychological and behavioral data. Feel free to experiment with clustering techniques in addition to descriptives.
+
+## Survey Diagnostics
+
+<b>BACKGROUND</b>: 892 participants were asked to answer a series of surveys asking about their demographic information and opinions. 
+
+First, we will load the data and look at the shape of the data.
+
+```{r}
+# Set root directory
+setwd("..")
+
+# Load data
+survey_data <-
+  read_sav('data/survey_data.sav')
+
+# Store the colnames of the survey data
+SurveyColnames <- colnames(survey_data)
+as.data.frame(SurveyColnames)
+```
+
+This is quite a lot of columns. Thankfully, the naming conventions make it easy to see which parts of the survey are sectioned together.
+
+### Missing Data
+
+Let's check if there are any NAs.
+
+```{r NA count}
+# Store the number of NA's in each column
+NAOutPut <- survey_data %>%
+  summarize_all(~ sum(is.na(.)))
+
+# Print the output in minimal form
+as.numeric(NAOutPut)
+```
+
+This is the number of NAs for each column (The output was truncated due to length). The NAs in columns 23 - 83 are all survey answers for the 'awareness', 'source', and 'behavior' sections -- while the columns after these that have NAs are asking about demographic and biographic information. It is normal for people to not complete a survey and there are a few tools we have at our disposal to consider.
+
+Let's see how many complete cases each section of the survey has.
+
+```{r Complete cases philosophy}
+# Store Complete number of cases
+Sections <- c("Philosophy","Attitudes", "Awareness", "Source", "Behvaior", "Demographic", "Biographic")
+CompleteCases <- numeric()
+
+# Function for appending Complete Cases
+appendCases <- function(matching) {
+  CompleteCases <<- append(CompleteCases,
+         survey_data %>%
+           select(starts_with(matching)) %>%
+           complete.cases() %>%
+           sum()
+         )
+}
+
+# Add complete observation counts for each section of the survey
+appendCases("m1_philosophy")
+appendCases("m2_attitudes")
+appendCases("m2_awareness")
+appendCases("source")
+appendCases("behavior")
+appendCases("d_")
+appendCases("s_")
+
+# Combine the section labels and the number of complete cases
+casesDf <- data.frame(Sections, CompleteCases)
+casesDf
+```
+
+'philosophy' and 'attitudes' were both fully taken by every individual who took the survey 'awareness', on the other hand, has 0 complete observations. 'source' and 'behavior' are special cases because their NAs represent that a person did not check a box, so their NAs could effectively be recoded as 0s and we can treat them as complete observations. Demographic questions had only ~ 25% complete observations, but the total number of NAs for the questions might not be bad. Finally, biographic questions were all complete.
+
+#### Awareness
+
+Let's dig into the proportion of NA's to not NA's each column in the 'awareness' section has to see how bad this problem really is.
+
+```{r Awareness NAs per column}
+# Get the percentage of NA's per column for the 'awareness' section
+survey_data %>%
+  select(starts_with("m2_awareness")) %>%
+  map(~ paste0(round(sum(is.na(.) / length(.)) * 100, 2), "%"))
+```
+
+It's really bad. The percentage of NA's for most columns is > 64%. For this reason, I suggest that data for the awareness section be recollected and analyzed when there is a sufficient response rate.
+
+> <b>NOTE</b>: Imputation is a possible solution for missing data, however the ratio of NA's to data for most questions is far greater than 50%. This means that the expected error for each imputed variable is very large. Additionally, imputation is more suited toward problems of prediction while the task we are answering is inferential.
+
+#### Demographics
+
+Let's try the same method on the demographic information.
+
+```{r Demographics NAs per column}
+# Get the percentage of NA's per column for the 'demographic' section
+survey_data %>%
+  select(starts_with("d_")) %>%
+  map(~ paste0(round(sum(is.na(.) / length(.)) * 100, 2), "%"))
+```
+
+This is quite a different story. It appears that people were fine responding with most demographic questions. Questions about their children or work schedule, however, were answered by less than 50% of the participants each. This still leaves us with large sample sizes for both variables: 33% of individuals (n = 300) willing to respond about their children and 49% of respondents (n = 433) willing to talk about their work schedule. We can even use willingness to respond about these variables as a feature itself.
+
+### Distributions
+
+There are many demographic and biographic variables in our dataset.
+
+```{r Survey distributions}
+survey_data %>%
+  select(starts_with(c("s_", "d_"))) %>%
+  mutate_all(~ as_factor(.)) %>%
+  map(~ kable(table(.)))
+```
+
+There are <b>many</b> demographic and biographic variables in the data, so we are going to skip analysis of each variable and just take note of important parts of our data. Additionally, many of the variables are already coded as numeric variables. 
+
+The following facts are notable for this dataset:
+
+<b>1.)</b> There are far more white individuals than any other group.
+
+<b>2.)</b> A majority of individuals are either married or have never married.
+
+<b>3.)</b> Every individual in the study has trouble sleep at least sometimes.
+
+<b>4.)</b> 1/3 respondents are parents.
+
+### Reliability
+
+To analyze whether the Likert scale survey sections are reliable measures, we will use the ```alpha``` function from the ```psych``` package. This will give internal consistency estimates based on Cronbach's Alpha as well as item statistics in one function.
+
+#### Philosophy
+```{r Philosophy alpha}
+# Alpha for the 'philosophy' scale
+survey_data %>%
+  select(starts_with("m1_philosophy")) %>%
+  alpha()
+```
+
+'philosophy' is not quite a singular measure (α = 0.66) (psychometric measures are considered reliable at α = 0.70 or greater). If question 2 is removed, it approaches singularity (α = 0.68), but does not reach it. In order to remedy this, I suggest that future surveys add questions.
+
+Question 9 also looks weak as removing it hardly changes alpha. Questions 2 and 9 also have low correlations to the item-total. Let's see what the results are if questions 2 and 9 are removed.
+
+```{r Philosophy dropped alpha}
+# Alpha estimate for the 'philosophy' scale without bad questions (2 and 9)
+survey_data %>%
+  select(starts_with("m1_philosophy"), -contains(c("_2","_9"))) %>%
+  alpha()
+```
+
+The mean Alpha estimate for these items is close enough to be considered acceptable (α = 0.69). According to the task description, this scale is meant to measure an individuals views on science, products, and health.
+
+#### Philosophy Composite Score
+
+Now we will create a new column to save the scale composite scores for philosophy in the case that we need it as a continuous variable. Because the 'philosophy' and 'attitudes' measures both use 5-point Likert scales, we can just take the mean value of each so we don't need to standardize the values later.
+
+```{r Philosophy questions}
+# Add 'philosophy' composite scores
+survey_data$philosophy_composite <- 
+  survey_data %>%
+  select(starts_with("m1_philosophy"), -contains(c("_2","_9"))) %>% 
+  rowMeans()
+```
+
+#### Attitudes
+
+The other scale we will be analyzing is the attitudes scale. Let's first see what the reliability is out of the gate.
+
+```{r Attitudes alpha}
+# Alpha estimate for the 'attitudes' scale
+survey_data %>% 
+  select(starts_with("m2_attitudes")) %>%
+  alpha()
+```
+
+This scale shows evidence for being a singular measure (α = 0.74). Additionally, the Alpha-if-item-dropped is not significantly higher for any question.
+
+There is one issue, however. The mean scores for a few questions are very high. Questions 1 and 2 both have very high means for a 5-point Likert measure (<i>M</i> = 4.40 and 4.50, respectively). Let's take a look at the questions:
+
+> 1. Getting high quality sleep is important for my long-term health
+
+> 2. Getting better sleep would improve my focus
+
+It is reasonable to expect that most people will put a 5 on both these questions. What happens to the results if these questions are dropped?
+
+```{r Attitudes alpha dropped}
+survey_data %>%
+  select(starts_with("m2_attitudes"), -contains(c("_1","_2"))) %>%
+  alpha()
+```
+
+Dropping these items leads to a less singular scale. For this reason and because the items do not have a very low standard deviation, they will be kept in the composite score calculation. In the future however, I recommend that these questions get reworked or reworded to increase the variance in responses while retaining the meaning of the question.
+
+#### Attitude Composite Score
+
+Just like with the philosophy scores, we can now create composite scores.
+
+```{r Attitudes composite}
+# Add 'attitudes' composite scores
+survey_data$attitudes_composite <- survey_data %>%
+  select(starts_with("m2_attitudes")) %>%
+  rowMeans(.)
+```
+
+## Clustering
+
+### MFA
+
+One major part of the task is to see if there are any underlying latent structures to our data. Using the ```MFA``` function from the ```FactoMineR``` package will help to accomplish this. 
+
+First we need to check if any of the variables we will be clustering have 0-variance or near-zero variance.
+
+```{r Survey subsetting}
+# Prefixes for each group of the survey
+survey_group_prefixes <- c("s_", "d_", "interest_", "past_", "behavior_", "source_")
+
+# Subset only variables of interest
+survey_factors <- survey_data %>%
+  rename(interest_cbt = interst_cbt) %>%
+  select(starts_with(survey_group_prefixes), ends_with("_composite")) %>%
+  map(~ as_factor(.)) %>%
+  as.data.frame()
+
+# Find variables that have 95% or more of their responses as one response
+near_0_vars <- nearZeroVar(survey_factors)
+near_0_vars
+```
+
+There are quite a few columns that have almost no variance. Let's take a look at what the variables consist of.
+
+```{r Near-0 variance}
+# Column names for near_0_variance predictors
+survey_factors[,near_0_vars] %>%
+  colnames()
+```
+
+A large number of 'behavior' columns as well as every 'source' variable had little to no variance. We will keep this in mind in case the results of the MFA are off. In order to run an MFA we needs to separate each section of the survey into groups.
+
+```{r}
+# Remove low-variance variables
+survey_factors <- survey_factors[,-near_0_vars]
+```
+
+Now, we can create the model.
+
+```{r MFA, fig.keep='none', results='hide', cache=TRUE}
+# All of the sources have been removed, so remove it from the prefixes list
+survey_group_prefixes <- survey_group_prefixes[!survey_group_prefixes %in% "source_"]
+
+# Create an ordered vector of the number of questions in each group
+survey_groups <- map(
+  survey_group_prefixes, 
+      function(x) length(
+        # Match column names to the survey_group_prefixes
+        grep(
+          # "^" specifies "start_with" in R's regex
+          paste0("^", x), 
+          colnames(survey_factors)))
+        )
+
+# Add survey composites to the end of the survey groups
+survey_groups <- c(survey_groups,1,1)
+
+# Names for each group
+survey_group_names <- c("Biographic", "Demographics", "Interests", "Past-Coach", "Behaviors", "Philosophy", "Attitudes")
+
+# Run an MFA
+survey_factors_MFA <- MFA(survey_factors %>% mutate_at(c("philosophy_composite", "attitudes_composite"), as.numeric), 
+                          group = as.numeric(survey_groups),
+                          # Specify groups (n = categorical, s = numeric)
+                          type = c(rep("n",5),rep("s",2)),
+                          name.group = survey_group_names,
+                          ncp = 6
+                          )
+```
+
+#### MFA Plots {.tabset}
+
+The `factoextra` library helps us plot the results. Click the tabs below to show different plots of the results.
+
+##### Variable Groups
+```{r MFA variable groups}
+fviz_mfa_var(survey_factors_MFA, 'group')
+```
+
+Most variable groups are explained more by dimension 1 than dimension 2. 'interests' appears to most strongly and almost solely related to dimension 1 while the same can be said for 'biographic' and dimension 2. Finally, 'behaviors' and 'attitudes' are very similar measures.
+
+##### Scree Plot
+```{r MFA scree plot}
+fviz_screeplot(survey_factors_MFA)
+paste("Number of Dimensions: ", nrow(survey_factors_MFA$eig))
+```
+
+The scree plot displays that the largest dimension (dimension 1) explains around 5% of the variance. For most datasets this is small, however given that our dataset has a very large number of dimensions (185), 5% still represents 9 variables.
+
+##### Partial Axes
+```{r MFA partial axes}
+fviz_mfa_axes(survey_factors_MFA, 
+              axes = c(1,2),
+              geom = c("point", "arrow"))
+```
+
+We can see that neither dimension 1 nor 2 are highly related to any single variable group. This is probably why both axes only account for a small portion of the variability in the sample. This means each group of variables is measuring something different (e.g. biographic information is not as strongly related to demographic information as we might think).
+
+##### Dim 1
+```{r MFA dimension 1}
+fviz_contrib(survey_factors_MFA, 
+             choice = "quali.var", 
+             axes = 1, 
+             top = 10)
+```
+These are the top variables for explaining dimension 1, which explains around 5% of the variance for the model. Looking at the top variables, it appears that the largest cluster in the data is explained by a combination of having a coach or being interested in a coach and to a lesser extent age. 
+
+##### Dim2
+```{r MFA dimension 2}
+fviz_contrib(survey_factors_MFA, 
+             choice = "quali.var", 
+             axes = 2, 
+             top = 10)
+```
+
+The second largest dimension in the model accounts for nearly 3% of the variance. This dimension is explained by being unsure about a coach, age, and to a lesser extent- socioeconomic status.
+
+### K-Modes
+
+Another way to cluster our data is using a K-modes algorithm, an extension of the more popular K-means algorithm. The `klaR` function from the `kmodes` package will help to accomplish this. But first, we need to create dummy variables for the demographic data because they are non-continuous, as well as some other data cleaning. The last thing the below chunk will accomplish is replacing NAs with 0s for the 'source' questions. Thankfully, removing zero-var variables was done previously, so we can reuse some of our work.
+
+```{r Dummy encoding}
+# Dummy code demographic, biographic, and interest variables
+survey_dummy <- survey_data %>%
+  rename(interest_cbt = interst_cbt) %>%
+  select(starts_with(survey_group_prefixes)) %>%
+  map(~ as_factor(.)) %>%
+  dummy_cols() %>%
+  select_if(is.numeric)
+
+cluster_data <- data.frame(
+  survey_dummy,
+  survey_data %>%
+    select(ends_with("_composite"))
+)
+
+ncol(cluster_data)
+```
+
+While dummy coding data dramatically increases the number of columns (221), any 1 column is straight-forward to interpret by its column name. Our data structure contains:
+
+1. Dummy coded demographic data (prefixed with ".data.s_")
+2. Dummy coded biographic data (prefixed with ".data.d_")
+3. Dummy coded data measuring interest in cognitive behavioral therapy (prefixed with ".data.interest_cbt_")
+4. Dummy coded data measuring interest in coaching (prefixed with ".data.interest_coach_")
+5. Dummy coded data for whether an individual has had a coach in the past (prefixed with ".data.past_coach_")
+6. Dummy coded data representing if the participant has taken partaken in specific behaviors to combat sleep problems (prefixed with ".data.behavior_")
+7. Composite scores for the 'philosophy' and 'attitudes' portions of the survey (suffixed with "_composite")
+
+Let's remove the low variance columns and replacs NAs with 0s like we did for the MFA.
+
+```{r Remove low-var columns k-modes}
+# Find low variance columns
+near_0_vars <- nearZeroVar(cluster_data)
+
+# Remove low variance columns
+cluster_data <- cluster_data[, -near_0_vars]
+
+# Replace NAs with 0s
+cluster_data <- cluster_data %>%
+  replace(is.na(.), 0)
+```
+
+We can now proceed with looking at a scree plot of k-modes variance within values by cluster to choose k for our algorithm.
+
+```{r Kmodes, results='hide', warnings = FALSE, message=FALSE, cache=TRUE}
+# Get within cluster variance values for k = 1:30
+klist <- numeric()
+
+map(1:30, function(x){
+  # Set the seed to ensure the output is consistent
+  set.seed(1073)
+  k <- kmodes(cluster_data, modes = x)
+  klist <<- c(klist, sum(k$withindiff))
+})
+
+kindex <- seq(1,length(klist))
+
+k_df <- data.frame(klist, kindex)
+```
+```{r Plot Kmodes}
+# Plot the errors for each value of K
+k_df %>%
+  ggplot(aes(x = kindex, y = klist)) +
+  geom_point(color = colorSet[1], size = 4) + 
+  theme_bw() +
+  labs(title = "Scree Plot of Total Error for K = 1:30", y = "Total Error", x = "K") +
+  theme(legend.position = "none", axis.text = element_text(size = 10), axis.title = element_text(size = 14), title = element_text(size = 16))
+```
+
+The "elbows" of the scree plot appears to be at K = 4 and K = 7. We will use K = 4, favoring a simple model. Using the labels for each person, we could look at a plot to see if clusters are related to having certain sources of sleep illness.
+
+```{r Clusters by source}
+# Set seed to ensure identical results each time
+set.seed(1073)
+
+# Kmodes on our data for K = 5
+km4 <- kmodes(cluster_data, modes = 4)
+
+source_cluster_data <- data.frame(km4$cluster, 
+                                  survey_data %>% select(starts_with("source")))
+
+# Graph the percentage of source of sleep issues by cluster
+source_cluster_data %>%
+  melt(id.vars = "km4.cluster") %>%
+  filter(value == 1) %>%
+  group_by(variable) %>%
+  count(km4.cluster) %>%
+  mutate(pct = round(n/sum(n),4) * 100) %>%
+  arrange(variable) %>%
+  ggplot(aes(x = variable, y = pct, fill = factor(km4.cluster))) + 
+  geom_bar(stat = "identity", position = position_stack(vjust = 0.5)) +
+  geom_text(aes(label = pct), position = position_stack(vjust = 0.5), size = 3.5) +
+  labs(x = "Source", y = "Percent of Total", title = "Distribution of Sleep Issues by Cluster (%)") +
+  theme_bw() +
+  theme(legend.title = element_blank(), axis.text.x = element_text(size = 10, angle = 45, hjust = 1), axis.title = element_text(size = 14), title = element_text(size = 16))
+```
+
+Each cluster can be analyzed as a group of people with similar characteristics which may be related to having a sleeping issue. For instance, only 7% reporting 'source_17' are from cluster 3. Lets look at cluster 3 to find out.
+
+```{r Cluster 3}
+# Add cluster labels to our data
+survey_data$cluster <- km4$cluster
+
+# Analyze people with cluster 3
+survey_data %>%
+  filter(cluster == 3) %>%
+  select(starts_with(c("d_"))) %>%
+  mutate_all(~ as_factor(.)) %>%
+  map(~ kable(table(.)))
+```
+
+The vast majority of people in this cluster are working 20+ hours pre week and are parents. Because 'source_17' was "other", we can assume that the vast majority of people who have children and work full time have up to 3 of the other listed sleep issues.
+
+## Summary
+
+We have extracted the following information from analyzing the survey data:
+
+<b>1.)</b> The sample is predominantly white, married or have never married, and unanimously have at least some sleeping issues.
+
+<b>2.)</b> Missing data in the 'awareness' section makes it unusable. I would ask for more data or for a new sample.
+
+<b>3.)</b> The 'philosophy' section is on the verge of measuring multiple latent structures. If it is important that it be a reliable measure, I suggest adding at least 2 - 3 more questions and/or rewording problematic questions (2 and 9).
+
+<b>4.)</b> The 'attitudes' section is a reliable measure, however questions 1 and 2 both have very high means for a 5-point Likert scale (<i>M</i> = 4.40 and 4.50, respectively). I would suggest rewording or replacing these items as they probably are providing little information to the scale despite increasing it's reliability.
+
+<b>5.)</b> Missing data in the demographics show that people are unanimously willing to answer most questions with the exception of questions about their children or work.
+
+<b>6.)</b> An MFA revealed that the 2 largest dimensions we can reduce the data to jointly explained ~ 8% of the variance and roughly mapped onto:
+
+a. Coaching interest 
+
+b. Socio-economic status and age
+
+<b>7.)</b> A K-modes clustering algorithm (K = 4) revealed that nearly all parents clustered together, and their sleeping issues can be described by one of the 14 listed sources of sleeping issues that are not 'other'.
+
+```{r Create .R file, echo=FALSE, eval=FALSE}
+purl("vignettes/Analysis.Rmd", documentation = 1)
+```
