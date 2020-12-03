@@ -6,7 +6,6 @@ Date: 2020-12-03
 Title: Gradient Analytics HW
 Description: An R vignette completing 2 tasks as part of the interview process at Gradient Analytics
 Maintainer: Jack Wychor <jack.wychor@mnsu.edu>
-VignetteBuilder: knitr
 Depends:
   tidyverse,
   MASS,
@@ -21,7 +20,7 @@ Depends:
   fastDummies,
   FactoMineR,
   logisticPCA,
-  klar
+  klaR
 Suggests:
   knitr,
   rmarkdown
