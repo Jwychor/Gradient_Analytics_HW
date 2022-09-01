@@ -1,4 +1,4 @@
-# Gradient Analytics Assignment
+# Gradient Analytics Analysis
 An R and Rmarkdown package analyzing data for Gradient Analytics.
 
 ## Installation
