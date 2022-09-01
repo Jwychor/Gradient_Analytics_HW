@@ -1,5 +1,5 @@
 ---
-title: "Gradient Analytics Assignment"
+title: "Gradient Analytics"
 author: "Jack Wychor"
 date: "December 3rd, 2020"
 output: 
